@@ -1,0 +1,24 @@
+# PostgreSQL 17 with the pgvector extension, for local development.
+# Start:  docker compose up -d      Stop:  docker compose down      Reset data:  docker compose down -v
+# Values come from .env (see .env.example); the defaults below are for local use only.
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: jeen-doc-index-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jeen}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jeen_local_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-doc_index}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jeen} -d ${POSTGRES_DB:-doc_index}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:

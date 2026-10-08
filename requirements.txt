@@ -1,0 +1,9 @@
+# Python 3.10+
+google-genai>=1.20,<3        # Gemini API SDK (gemini-embedding-001)
+pypdf>=5.0,<7                # PDF text extraction
+python-docx>=1.1,<2          # DOCX text extraction
+psycopg[binary]>=3.2,<4      # PostgreSQL driver
+pgvector>=0.3,<1             # vector type adapter for psycopg
+numpy>=1.26,<3               # vector normalization
+python-dotenv>=1.0,<2        # .env loading
+pytest>=8,<10                # tests (no API key or database needed)
