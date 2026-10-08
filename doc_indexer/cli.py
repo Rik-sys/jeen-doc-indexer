@@ -27,8 +27,24 @@ def setup_logging(verbose: bool) -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+def use_system_certificates() -> None:
+    """Verify HTTPS against the operating system's certificate store.
+
+    Python ships its own CA bundle (certifi). On corporate networks a proxy often
+    re-signs HTTPS traffic with the company's root certificate, which the OS trusts
+    but certifi does not, so API calls fail with CERTIFICATE_VERIFY_FAILED.
+    ``truststore`` makes Python use the OS store instead. Verification stays on.
+    """
+    try:
+        import truststore
+    except ImportError:  # optional: without it Python's bundled CA list is used
+        return
+    truststore.inject_into_ssl()
+
+
 def run(main: Callable[[], int], verbose: bool) -> None:
     """Run ``main`` and turn expected errors into a one-line message + exit code."""
+    use_system_certificates()
     try:
         code = main()
     except IndexerError as exc:

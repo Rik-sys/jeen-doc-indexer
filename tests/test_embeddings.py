@@ -64,3 +64,14 @@ def test_invalid_key_is_not_retried():
 def test_wrong_dimension_is_rejected():
     with pytest.raises(EmbeddingError, match="768"):
         make(FakeModels(dim=3072)).embed_documents(["a"])
+
+
+def test_certificate_error_is_not_retried():
+    class CertFail(FakeModels):
+        def embed_content(self, model, contents, config):
+            self.calls.append(1)
+            raise OSError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed")
+    m = CertFail()
+    with pytest.raises(EmbeddingError, match="certificate"):
+        make(m).embed_documents(["a"])
+    assert len(m.calls) == 1

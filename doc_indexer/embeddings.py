@@ -88,6 +88,12 @@ class GeminiEmbedder:
                 raise
             except Exception as exc:  # network errors, timeouts
                 last_error = f"{type(exc).__name__}: {_short(str(exc))}"
+                if "CERTIFICATE_VERIFY_FAILED" in str(exc):  # retrying won't help
+                    raise EmbeddingError(
+                        f"HTTPS certificate check failed ({last_error}). A network proxy is probably "
+                        "re-signing traffic: run `pip install -r requirements.txt` (installs truststore) "
+                        "or try another network."
+                    ) from exc
             if attempt < self.max_attempts:
                 delay = self.base_delay * 2 ** (attempt - 1) + random.uniform(0, 0.5)
                 log.warning("Embedding attempt %d/%d failed (%s). Retrying in %.1fs",

@@ -45,11 +45,11 @@ cd jeen-doc-indexer
 
 # 1. Python environment
 python -m venv .venv
-source .venv/bin/activate            # Windows PowerShell: .venv\Scripts\Activate.ps1
+source .venv/bin/activate            # Windows: .venv\Scripts\activate.bat (cmd) or .venv\Scripts\Activate.ps1 (PowerShell)
 pip install -r requirements.txt
 
 # 2. Configuration
-cp .env.example .env                 # Windows PowerShell: Copy-Item .env.example .env
+cp .env.example .env                 # Windows: copy .env.example .env
 # edit .env and set GEMINI_API_KEY
 
 # 3. Database (PostgreSQL 17 + pgvector)
@@ -183,6 +183,7 @@ call, so a stopped database never wastes API quota.
 | **Content hash + `UNIQUE`** | Re-indexing is idempotent and doesn't spend API quota on chunks already stored |
 | **HNSW index** with `vector_cosine_ops` | Fast approximate nearest-neighbour search that keeps working as the index grows |
 | **Regex sentence splitting** | No heavy NLP dependency; handles English and Hebrew punctuation, abbreviations and numbered headings |
+| **OS certificate store** via `truststore` | Corporate proxies often re-sign HTTPS; Python's bundled CA list rejects them (`CERTIFICATE_VERIFY_FAILED`). Using the OS store fixes this without turning verification off, and certificate errors fail fast instead of being retried |
 | **Scanned PDFs are rejected**, not OCR'd | Out of scope; reported explicitly. OCR (e.g. Tesseract or a vision model) is a natural extension |
 
 Possible extensions: hybrid search (pgvector + PostgreSQL full-text), metadata such as page numbers per
@@ -190,26 +191,121 @@ chunk, an evaluation set of question → expected chunk to compare strategies ob
 
 ## Example runs
 
-> Outputs below are from a real run against Gemini and a local pgvector database.
+> Real output from a run against the Gemini API and the local pgvector database (Windows, Python 3.10).
 
 ### Indexing
 
 ```text
-<!-- paste the output of: python index_documents.py --file ./docs/example.pdf --strategy all -->
+$ python index_documents.py --file ./docs/example.pdf --strategy all
+✓ Extracted 6,730 characters from example.pdf (3 pages)
+✓ Split into 9 chunks (strategy=fixed, target<=1000 chars, overlap=200, avg 917 chars)
+✓ Split into 22 chunks (strategy=sentence, target<=800 chars, avg 303 chars)
+✓ Split into 20 chunks (strategy=paragraph, target<=1500 chars, avg 333 chars)
+✓ Embedded 9 chunks with gemini-embedding-001 (768 dims) in 1 batch(es)
+✓ Stored 9 rows in document_chunks (0 already indexed, skipped)
+✓ Embedded 22 chunks with gemini-embedding-001 (768 dims) in 1 batch(es)
+✓ Stored 22 rows in document_chunks (0 already indexed, skipped)
+✓ Embedded 20 chunks with gemini-embedding-001 (768 dims) in 1 batch(es)
+✓ Stored 20 rows in document_chunks (0 already indexed, skipped)
+✓ Done in 4.4s. Database: localhost:5432/doc_index
+
+$ python index_documents.py --file ./docs/technician_visits_he.docx --strategy paragraph
+✓ Extracted 965 characters from technician_visits_he.docx
+✓ Split into 4 chunks (strategy=paragraph, target<=1500 chars, avg 237 chars)
+✓ Embedded 4 chunks with gemini-embedding-001 (768 dims) in 1 batch(es)
+✓ Stored 4 rows in document_chunks (0 already indexed, skipped)
+✓ Done in 1.8s. Database: localhost:5432/doc_index
 ```
 
 ### Search
 
 ```text
-<!-- paste the output of: python search.py --query "login issue" --top-k 3 -->
+$ python search.py --query "login issue" --top-k 3
+Top 3 results for "login issue"
+
+#1  score=0.698  example.pdf  [paragraph]  chunk 3
+    Symptoms: the customer cannot log in to the personal area on the website or in the mobile app.
+    Typical messages are "incorrect password", "user not found" or a reset code that never arrives.
+    Steps: first verify that the mobile number on the account is …
+
+#2  score=0.693  example.pdf  [fixed]  chunk 1
+    login failure Symptoms: the customer cannot log in to the personal area on the website or in the
+    mobile app. Typical messages are "incorrect password", "user not found" or a reset code that
+    never arrives. Steps: first verify that the mobile number on the …
+
+#3  score=0.690  example.pdf  [sentence]  chunk 2
+    2. KB-112 Personal area: login failure Symptoms: the customer cannot log in to the personal area
+    on the website or in the mobile app. Typical messages are "incorrect password", "user not found"
+    or a reset code that never arrives. Steps: first verify that the …
+```
+
+All three strategies return the KB-112 login procedure first. The next query shares almost no words with
+the document ("paid two times" vs. "charged twice") and still finds the double-charge procedure:
+
+```text
+$ python search.py --query "the customer says he paid two times this month" --top-k 2
+Top 2 results for "the customer says he paid two times this month"
+
+#1  score=0.752  example.pdf  [sentence]  chunk 6
+    6. KB-305 Billing: double charge and refund requests When a customer reports being charged
+    twice, open the last two invoices and the payment history. A duplicate charge appears as two
+    identical amounts on the same billing date. If a duplicate charge is …
+
+#2  score=0.751  example.pdf  [paragraph]  chunk 13
+    If a duplicate charge is confirmed, open a Billing ticket with priority Medium and attach both
+    transaction references. The refund is issued by the Billing department to the original payment
+    method within two billing cycles. Representatives may tell the …
+```
+
+A Hebrew question ("When may a technician be sent to a customer?") retrieves the Hebrew procedure:
+
+```text
+$ python search.py --query "מתי מותר לשלוח טכנאי ללקוח?" --top-k 2
+Top 2 results for "מתי מותר לשלוח טכנאי ללקוח?"
+
+#1  score=0.772  technician_visits_he.docx  [paragraph]  chunk 0
+    נוהל ביקור טכנאי בבית הלקוח מסמך הדגמה פיקטיבי שנוצר עבור מטלת הבית של Jeen AI. אינו מסמך של
+    חברה אמיתית. מתי מזמינים טכנאי מזמינים ביקור טכנאי רק אחרי שבוצעה בדיקת תקלות אזוריות, ובדיקת קו
+    מרחוק נכשלה. אם קיימת תקלה פעילה באזור הלקוח, אין לתאם ביקור, ויש …
+
+#2  score=0.748  technician_visits_he.docx  [paragraph]  chunk 1
+    תיאום הביקור יש להציע ללקוח את שני חלונות הזמן הקרובים ביותר, בבוקר ובאחר הצהריים. הביקור נקבע
+    רק אחרי שהלקוח אישר את הכתובת ואת מספר הטלפון ליצירת קשר. ביום הביקור נשלחת ללקוח הודעת SMS עם
+    שעת הגעה משוערת.
+```
+
+Comparing strategies on the same query:
+
+```text
+$ python search.py --query "login issue" --top-k 1 --strategy fixed
+#1  score=0.693  example.pdf  [fixed]  chunk 1
+
+$ python search.py --query "login issue" --top-k 1 --strategy paragraph
+#1  score=0.698  example.pdf  [paragraph]  chunk 3
 ```
 
 ### Rows stored in the database
 
 ```text
-<!-- paste the output of:
-docker exec -it jeen-doc-index-db psql -U jeen -d doc_index -c "SELECT id, filename, split_strategy, chunk_index, left(chunk_text, 60) AS preview, created_at FROM document_chunks ORDER BY id LIMIT 5;"
--->
+$ docker exec -it jeen-doc-index-db psql -U jeen -d doc_index -c "SELECT id, filename, split_strategy, chunk_index, left(chunk_text, 60) AS preview, created_at FROM document_chunks ORDER BY id LIMIT 5;"
+ id |  filename   | split_strategy | chunk_index |                           preview                            |          created_at
+----+-------------+----------------+-------------+--------------------------------------------------------------+-------------------------------
+  1 | example.pdf | fixed          |           0 | Contact Center Knowledge Base Fictional telecom operator · V | 2026-10-08 23:15:48.187185+00
+  2 | example.pdf | fixed          |           1 | login failure Symptoms: the customer cannot log in to the pe | 2026-10-08 23:15:48.187185+00
+  3 | example.pdf | fixed          |           2 | account is locked automatically after five failed login atte | 2026-10-08 23:15:48.187185+00
+  4 | example.pdf | fixed          |           3 | phone line or TV), check the outage map for the customer's c | 2026-10-08 23:15:48.187185+00
+  5 | example.pdf | fixed          |           4 | light usually indicates a line problem; normal lights with o | 2026-10-08 23:15:48.187185+00
+(5 rows)
+```
+
+### Error handling in practice
+
+```text
+$ python index_documents.py --file ./docs/missing.pdf --strategy fixed
+✗ Error: File not found: ./docs/missing.pdf
+
+$ python index_documents.py --file ./requirements.txt --strategy fixed
+✗ Error: Unsupported file type '.txt'. Supported: .pdf, .docx
 ```
 
 ### Dry run (no API key needed)
@@ -263,9 +359,9 @@ jeen-doc-indexer/
 pytest
 ```
 
-42 tests cover the three chunking strategies (sizes, overlap, word boundaries, Hebrew sentences,
+43 tests cover the three chunking strategies (sizes, overlap, word boundaries, Hebrew sentences,
 abbreviations, headings), text cleaning, extraction of both sample files and every file-error path, and the
-embedding client (normalization, batching, task types, retry and give-up behaviour) using a fake API client.
+embedding client (normalization, batching, task types, retry and give-up behaviour, certificate errors) using a fake API client.
 They need neither an API key nor a database.
 
 ---

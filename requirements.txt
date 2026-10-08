@@ -6,4 +6,5 @@ psycopg[binary]>=3.2,<4      # PostgreSQL driver
 pgvector>=0.3,<1             # vector type adapter for psycopg
 numpy>=1.26,<3               # vector normalization
 python-dotenv>=1.0,<2        # .env loading
+truststore>=0.9,<1           # use the OS certificate store (corporate proxies)
 pytest>=8,<10                # tests (no API key or database needed)
